@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// Règles de sécurité Firestore — Andiamo-LDC (V1, sans Cloud Functions)
+// À coller dans Firebase Console → Firestore Database → Règles,
+// ou déployer avec `firebase deploy --only firestore:rules`.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function myRole() {
+      return myUser().data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (myRole() == 'admin' || myRole() == 'owner');
+    }
+
+    function isOwner() {
+      return isSignedIn() && myRole() == 'owner';
+    }
+
+    // ---- users ----
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      // Un joueur peut modifier son propre profil, SAUF son rôle.
+      allow update: if isSignedIn() && (
+        (request.auth.uid == uid && request.resource.data.role == resource.data.role) ||
+        // Seul le propriétaire peut changer un rôle (nommer/retirer un admin).
+        (isOwner() && request.resource.data.role != resource.data.role)
+      );
+      allow delete: if isOwner();
+    }
+
+    // ---- clubs ----
+    match /clubs/{clubId} {
+      allow read: if true; // classement public, pas besoin d'être connecté
+      allow write: if isAdmin();
+    }
+
+    // ---- matches ----
+    match /matches/{matchId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---- predictions ----
+    match /predictions/{predictionId} {
+      allow read: if isSignedIn();
+
+      // Un joueur ne peut créer/modifier QUE son propre pronostic,
+      // et seulement si le match n'est pas encore verrouillé (30 min avant).
+      allow create, update: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.time < get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.locksAt;
+
+      // Les champs de score (points, exact, correctResult) ne sont
+      // modifiables que par un admin (après un match terminé).
+      allow update: if isAdmin();
+
+      allow delete: if isAdmin();
+    }
+
+    // ---- seasonBonusPicks ----
+    match /seasonBonusPicks/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && request.auth.uid == uid
+        && request.time < get(/databases/$(database)/documents/settings/preseasonLock).data.locksAt;
+      allow write: if isAdmin();
+    }
+
+    // ---- seasonBonusResults ----
+    match /seasonBonusResults/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---- settings (verrouillage inscriptions, dates de verrouillage) ----
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

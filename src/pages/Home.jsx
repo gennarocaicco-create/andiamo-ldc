@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fetchAllMatches } from '../services/matches.js';
 import { fetchPlayerLeaderboard } from '../services/players.js';
+import { signOut } from '../services/auth.js';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Home() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [nextMatch, setNextMatch] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [myRank, setMyRank] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  async function handleLogout() {
+    await signOut();
+    navigate('/login');
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -97,18 +104,31 @@ export default function Home() {
         </Link>
       </div>
 
-      <Link
-        to="/profil"
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10, margin: '18px 16px 0', padding: '12px 14px',
-          background: 'rgba(27,63,160,0.04)', borderRadius: 13, textDecoration: 'none', color: 'var(--navy-soft)',
-        }}
-      >
-        <div style={{ flex: 1, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
-          Mon profil, mes stats détaillées et mes réglages
-        </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, opacity: 0.5 }}>›</div>
-      </Link>
+      <div style={{ display: 'flex', gap: 8, margin: '18px 16px 0' }}>
+        <Link
+          to="/profil"
+          style={{
+            flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+            background: 'rgba(27,63,160,0.04)', borderRadius: 13, textDecoration: 'none', color: 'var(--navy-soft)',
+          }}
+        >
+          <div style={{ flex: 1, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
+            Mon profil, mes stats détaillées et mes réglages
+          </div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, opacity: 0.5 }}>›</div>
+        </Link>
+
+        <button
+          onClick={handleLogout}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '12px 14px',
+            background: 'rgba(184,69,47,0.08)', borderRadius: 13, border: 'none', cursor: 'pointer',
+            color: 'var(--lock)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, whiteSpace: 'nowrap',
+          }}
+        >
+          Se déconnecter
+        </button>
+      </div>
 
       <BottomNav />
     </div>

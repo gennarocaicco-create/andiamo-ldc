@@ -27,6 +27,13 @@ service cloud.firestore {
       return isSignedIn() && myRole() == 'owner';
     }
 
+    // ---- pseudos (réservation de pseudo, vérifiée avant la création de compte) ----
+    match /pseudos/{pseudoId} {
+      allow read: if true; // tout le monde doit pouvoir vérifier si un pseudo est pris
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // ---- users ----
     match /users/{uid} {
       allow read: if isSignedIn();
@@ -72,9 +79,16 @@ service cloud.firestore {
     // ---- seasonBonusPicks ----
     match /seasonBonusPicks/{uid} {
       allow read: if isSignedIn();
+      // Tant qu'aucune date de verrouillage n'a été définie par un admin
+      // (document settings/preseasonLock absent), l'enregistrement reste
+      // ouvert par défaut — évite un blocage si ce réglage n'a jamais été
+      // configuré.
       allow create, update: if isSignedIn()
         && request.auth.uid == uid
-        && request.time < get(/databases/$(database)/documents/settings/preseasonLock).data.locksAt;
+        && (
+          !exists(/databases/$(database)/documents/settings/preseasonLock) ||
+          request.time < get(/databases/$(database)/documents/settings/preseasonLock).data.locksAt
+        );
       allow write: if isAdmin();
     }
 
@@ -88,6 +102,13 @@ service cloud.firestore {
     match /settings/{docId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // ---- auditLog (journal des actions admin, visible par le owner seul) ----
+    match /auditLog/{entryId} {
+      allow read: if isOwner();
+      allow create: if isAdmin() && request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if false; // le journal ne se modifie ni ne se supprime
     }
   }
 }

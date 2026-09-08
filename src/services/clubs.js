@@ -7,3 +7,9 @@ export async function fetchClubStandings() {
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
+
+/** Juste les noms des 36 clubs, triés alphabétiquement (pour le sélecteur de bonus). */
+export async function fetchClubNames() {
+  const snap = await getDocs(collection(db, 'clubs'));
+  return snap.docs.map((d) => d.data().name).sort((a, b) => a.localeCompare(b, 'fr'));
+}

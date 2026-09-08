@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fetchMatch, fetchMyPrediction, submitPrediction } from '../services/matches.js';
 
@@ -9,6 +9,7 @@ export default function MatchPredict() {
   const navigate = useNavigate();
 
   const [match, setMatch] = useState(null);
+  const [existingPrediction, setExistingPrediction] = useState(null);
   const [home, setHome] = useState(1);
   const [away, setAway] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -23,6 +24,7 @@ export default function MatchPredict() {
       ]);
       if (cancelled) return;
       setMatch(m);
+      setExistingPrediction(prediction);
       if (prediction) {
         setHome(prediction.predictedScore.home);
         setAway(prediction.predictedScore.away);
@@ -46,6 +48,49 @@ export default function MatchPredict() {
   }
 
   if (!match) return <div className="loading-screen">Chargement...</div>;
+
+  const locksAt = match.locksAt?.toDate ? match.locksAt.toDate().getTime() : null;
+  const isLocked = locksAt !== null && Date.now() >= locksAt;
+
+  // Le match est verrouillé (en cours, à moins de 30 min du coup d'envoi,
+  // ou terminé) : plus aucune modification possible, on affiche juste le
+  // pronostic figé, sans stepper ni bouton de sauvegarde.
+  if (isLocked) {
+    return (
+      <div className="app-shell">
+        <header style={{ padding: '26px 20px 4px' }}>
+          <div className="eyebrow" style={{ color: 'var(--lock)' }}>Match verrouillé</div>
+          <h1>{match.homeClub} — {match.awayClub}</h1>
+        </header>
+
+        <div className="card" style={{ marginTop: 16, textAlign: 'center' }}>
+          {existingPrediction ? (
+            <>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: 'var(--navy-soft)', textTransform: 'uppercase', marginBottom: 10 }}>
+                Ton pronostic (figé)
+              </div>
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 40, fontWeight: 700 }}>
+                {existingPrediction.predictedScore.home} – {existingPrediction.predictedScore.away}
+              </div>
+            </>
+          ) : (
+            <div style={{ color: 'var(--navy-soft)', fontSize: 13, padding: '10px 0' }}>
+              Tu n'avais pas pronostiqué ce match avant le verrouillage.
+            </div>
+          )}
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--lock)', marginTop: 14 }}>
+            Ce match a commencé ou est sur le point de commencer — les pronostics ne sont plus modifiables.
+          </div>
+        </div>
+
+        <div style={{ padding: '16px 16px 0' }}>
+          <Link to="/matchs" className="btn btn-primary btn-block" style={{ display: 'block', textAlign: 'center' }}>
+            Retour aux matchs
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell" style={{ paddingBottom: 110 }}>

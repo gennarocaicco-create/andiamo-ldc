@@ -1,0 +1,1 @@
+import{g as t,c,q as e,o as r,d as o}from"./index-DrVN7gRc.js";async function i(){const n=e(c(o,"clubs"),r("points","desc"));return(await t(n)).docs.map(s=>({id:s.id,...s.data()}))}async function p(){return(await t(c(o,"clubs"))).docs.map(a=>a.data().name).sort((a,s)=>a.localeCompare(s,"fr"))}export{p as a,i as f};

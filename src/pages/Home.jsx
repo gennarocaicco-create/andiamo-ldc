@@ -5,6 +5,7 @@ import { fetchPlayerLeaderboard } from '../services/players.js';
 import { fetchCommunityPicks } from '../services/communityPicks.js';
 import { signOut } from '../services/auth.js';
 import ScorePickersSheet from '../components/ScorePickersSheet.jsx';
+import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Home() {
@@ -21,31 +22,33 @@ export default function Home() {
     navigate('/login');
   }
 
+  async function load() {
+    const players = await fetchPlayerLeaderboard();
+    setLeaderboard(players.slice(0, 5));
+    const myIndex = players.findIndex((p) => p.id === profile?.id);
+    setMyRank(myIndex >= 0 ? { rank: myIndex + 1, total: players.length, ...players[myIndex] } : null);
+
+    const playersById = new Map(players.map((p) => [p.id, p]));
+    const picks = await fetchCommunityPicks(playersById);
+    setCommunityPicks(picks);
+  }
+
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      const players = await fetchPlayerLeaderboard();
-      if (cancelled) return;
-
-      setLeaderboard(players.slice(0, 5));
-      const myIndex = players.findIndex((p) => p.id === profile?.id);
-      setMyRank(myIndex >= 0 ? { rank: myIndex + 1, total: players.length, ...players[myIndex] } : null);
-
-      const playersById = new Map(players.map((p) => [p.id, p]));
-      const picks = await fetchCommunityPicks(playersById);
-      if (cancelled) return;
-      setCommunityPicks(picks);
-
-      setLoading(false);
+    async function initialLoad() {
+      await load();
+      if (!cancelled) setLoading(false);
     }
-    load();
+    initialLoad();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   if (loading) return <div className="loading-screen">Chargement...</div>;
 
   return (
     <div className="app-shell">
+      <PullToRefresh onRefresh={load}>
       <header style={{ padding: '26px 20px 4px' }}>
         <div className="eyebrow">Ligue des Champions</div>
         <h1>Bonjour, {profile?.pseudo}</h1>
@@ -152,6 +155,7 @@ export default function Home() {
           Se déconnecter
         </button>
       </div>
+      </PullToRefresh>
 
       <BottomNav />
 

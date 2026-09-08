@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fetchAllMatches, fetchMyPrediction } from '../services/matches.js';
+import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Matches() {
@@ -10,22 +11,26 @@ export default function Matches() {
   const [myPredictions, setMyPredictions] = useState({});
   const [loading, setLoading] = useState(true);
 
+  async function load() {
+    const list = await fetchAllMatches();
+    setMatches(list);
+
+    const entries = await Promise.all(
+      list.map(async (m) => [m.id, await fetchMyPrediction(m.id, profile.id)])
+    );
+    setMyPredictions(Object.fromEntries(entries.filter(([, v]) => v)));
+  }
+
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      const list = await fetchAllMatches();
-      if (cancelled) return;
-      setMatches(list);
-
-      const entries = await Promise.all(
-        list.map(async (m) => [m.id, await fetchMyPrediction(m.id, profile.id)])
-      );
-      if (cancelled) return;
-      setMyPredictions(Object.fromEntries(entries.filter(([, v]) => v)));
-      setLoading(false);
+    async function initialLoad() {
+      if (!profile) return;
+      await load();
+      if (!cancelled) setLoading(false);
     }
-    if (profile) load();
+    initialLoad();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   if (loading) return <div className="loading-screen">Chargement...</div>;
@@ -34,6 +39,7 @@ export default function Matches() {
 
   return (
     <div className="app-shell">
+      <PullToRefresh onRefresh={load}>
       <header style={{ padding: '26px 20px 4px' }}>
         <div className="eyebrow">Ligue des Champions</div>
         <h1>Matchs</h1>
@@ -105,6 +111,7 @@ export default function Matches() {
           Aucun match pour l'instant — reviens plus tard.
         </div>
       )}
+      </PullToRefresh>
 
       <BottomNav />
     </div>

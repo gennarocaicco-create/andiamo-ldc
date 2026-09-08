@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react';
 import { fetchClubStandings } from '../services/clubs.js';
+import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Clubs() {
   const [clubs, setClubs] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  async function load() {
+    const list = await fetchClubStandings();
+    setClubs(list);
+  }
+
   useEffect(() => {
-    fetchClubStandings().then((list) => {
-      setClubs(list);
-      setLoading(false);
-    });
+    load().then(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="loading-screen">Chargement...</div>;
 
   return (
     <div className="app-shell">
+      <PullToRefresh onRefresh={load}>
       <header style={{ padding: '26px 20px 4px' }}>
         <div className="eyebrow">Phase de Ligue</div>
         <h1>Clubs</h1>
@@ -42,6 +46,7 @@ export default function Clubs() {
           Le classement des clubs n'est pas encore disponible.
         </div>
       )}
+      </PullToRefresh>
 
       <BottomNav />
     </div>

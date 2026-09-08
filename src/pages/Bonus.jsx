@@ -5,6 +5,7 @@ import { fetchClubNames } from '../services/clubs.js';
 import { getClubCrestUrl } from '../services/clubCrests.js';
 import { fetchPreseasonLockStatus } from '../services/preseasonLock.js';
 import ClubPickerSheet from '../components/ClubPickerSheet.jsx';
+import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Bonus() {
@@ -19,17 +20,20 @@ export default function Bonus() {
   // null = fermé, 'winner' | 'finalist' | {top8: index} = ouvert pour ce champ
   const [pickerFor, setPickerFor] = useState(null);
 
-  useEffect(() => {
-    Promise.all([
+  async function load() {
+    const [existing, names, isLocked] = await Promise.all([
       fetchMyBonusPicks(profile.id),
       fetchClubNames(),
       fetchPreseasonLockStatus(),
-    ]).then(([existing, names, isLocked]) => {
-      if (existing) setPicks({ top8: existing.top8 || [], winner: existing.winner || '', finalist: existing.finalist || '', topScorer: existing.topScorer || '' });
-      setClubNames(names);
-      setLocked(isLocked);
-      setLoading(false);
-    });
+    ]);
+    if (existing) setPicks({ top8: existing.top8 || [], winner: existing.winner || '', finalist: existing.finalist || '', topScorer: existing.topScorer || '' });
+    setClubNames(names);
+    setLocked(isLocked);
+  }
+
+  useEffect(() => {
+    load().then(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   // Charge l'écusson de chaque club déjà sélectionné (pour l'affichage).
@@ -77,6 +81,7 @@ export default function Bonus() {
   if (locked) {
     return (
       <div className="app-shell">
+        <PullToRefresh onRefresh={load}>
         <header style={{ padding: '26px 20px 4px' }}>
           <div className="eyebrow" style={{ color: 'var(--lock)' }}>Verrouillés</div>
           <h1>Bonus</h1>
@@ -116,6 +121,7 @@ export default function Bonus() {
             {picks.topScorer || <span style={{ color: 'var(--navy-soft)' }}>Tu n'avais rien renseigné.</span>}
           </div>
         </div>
+        </PullToRefresh>
 
         <BottomNav />
       </div>
@@ -124,6 +130,7 @@ export default function Bonus() {
 
   return (
     <div className="app-shell">
+      <PullToRefresh onRefresh={load}>
       <header style={{ padding: '26px 20px 4px' }}>
         <div className="eyebrow">Ligue des Champions</div>
         <h1>Bonus</h1>
@@ -187,6 +194,7 @@ export default function Bonus() {
         </button>
         {savedMessage && <div className="error-text" style={{ textAlign: 'center' }}>{savedMessage}</div>}
       </div>
+      </PullToRefresh>
 
       <BottomNav />
 

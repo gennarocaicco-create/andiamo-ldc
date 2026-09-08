@@ -8,6 +8,7 @@ import { fetchAllMatches } from '../services/matches.js';
 import { fetchMyBonusPicks, fetchBonusResults } from '../services/bonus.js';
 import { computeBonusBreakdown } from '../services/bonusScoring.js';
 import { getClubCrestUrl } from '../services/clubCrests.js';
+import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Players() {
@@ -22,15 +23,24 @@ export default function Players() {
   const [matches, setMatches] = useState([]);
   const [bonusResults, setBonusResults] = useState(null);
 
+  async function load() {
+    const [playerList, matchList, results] = await Promise.all([
+      fetchPlayerLeaderboard(),
+      fetchAllMatches(),
+      fetchBonusResults(),
+    ]);
+    setPlayers(playerList);
+    setMatches(matchList);
+    setBonusResults(results);
+    // Les données par joueur (déjà ouvertes) peuvent être devenues obsolètes
+    // (nouveau score, verrouillage, etc.) — on les recalculera à la prochaine
+    // ouverture plutôt que de garder d'anciennes valeurs affichées.
+    setRecent({});
+    setBonusInfo({});
+  }
+
   useEffect(() => {
-    Promise.all([fetchPlayerLeaderboard(), fetchAllMatches(), fetchBonusResults()]).then(
-      ([playerList, matchList, results]) => {
-        setPlayers(playerList);
-        setMatches(matchList);
-        setBonusResults(results);
-        setLoading(false);
-      }
-    );
+    load().then(() => setLoading(false));
   }, []);
 
   async function toggleOpen(playerId) {
@@ -78,6 +88,7 @@ export default function Players() {
 
   return (
     <div className="app-shell">
+      <PullToRefresh onRefresh={load}>
       <header style={{ padding: '26px 20px 4px' }}>
         <div className="eyebrow">Ligue des Champions</div>
         <h1>Joueurs</h1>
@@ -198,6 +209,7 @@ export default function Players() {
           </div>
         );
       })}
+      </PullToRefresh>
 
       <BottomNav />
     </div>

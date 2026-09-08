@@ -30,11 +30,19 @@ export async function fetchPlayerLeaderboard() {
       correctResult: !!p.correctResult,
     })));
     const exactCount = myPredictions.filter((p) => p.exact).length;
+    const correctOnlyCount = myPredictions.filter((p) => p.correctResult && !p.exact).length;
 
-    return { ...player, points, tieBreak, exactCount, predictionsCount: myPredictions.length };
+    return { ...player, points, tieBreak, exactCount, correctOnlyCount, predictionsCount: myPredictions.length };
   });
 
   return rankPlayers(withScores);
+}
+
+/** Tous les pronostics bruts d'un joueur (exact/correctResult/points inclus), sans filtre de verrouillage — utilisé pour calculer les bonus. */
+export async function fetchPlayerRawPredictions(uid) {
+  const q = query(collection(db, 'predictions'), where('uid', '==', uid));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 /**

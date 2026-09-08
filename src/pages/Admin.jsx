@@ -25,7 +25,13 @@ export default function Admin() {
         <h1>Administration</h1>
       </header>
 
-      <div style={{ display: 'flex', gap: 8, padding: '16px 20px 4px', overflowX: 'auto' }}>
+      <div
+        style={{
+          display: 'flex', gap: 8, padding: '16px 20px 12px', overflowX: 'auto',
+          position: 'sticky', top: 0, zIndex: 20, background: 'var(--bg-bottom)',
+          boxShadow: '0 8px 12px -8px rgba(15,31,61,0.12)',
+        }}
+      >
         {tabs.map((t) => (
           <button
             key={t}

@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { fetchMyBonusPicks, saveMyBonusPicks } from '../services/bonus.js';
 import { fetchClubNames } from '../services/clubs.js';
 import { getClubCrestUrl } from '../services/clubCrests.js';
+import { fetchPreseasonLockStatus } from '../services/preseasonLock.js';
 import ClubPickerSheet from '../components/ClubPickerSheet.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
@@ -13,14 +14,22 @@ export default function Bonus() {
   const [crests, setCrests] = useState({});
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState('');
+  const [locked, setLocked] = useState(false);
+  const [loading, setLoading] = useState(true);
   // null = fermé, 'winner' | 'finalist' | {top8: index} = ouvert pour ce champ
   const [pickerFor, setPickerFor] = useState(null);
 
   useEffect(() => {
-    fetchMyBonusPicks(profile.id).then((existing) => {
+    Promise.all([
+      fetchMyBonusPicks(profile.id),
+      fetchClubNames(),
+      fetchPreseasonLockStatus(),
+    ]).then(([existing, names, isLocked]) => {
       if (existing) setPicks({ top8: existing.top8 || [], winner: existing.winner || '', finalist: existing.finalist || '', topScorer: existing.topScorer || '' });
+      setClubNames(names);
+      setLocked(isLocked);
+      setLoading(false);
     });
-    fetchClubNames().then(setClubNames);
   }, [profile]);
 
   // Charge l'écusson de chaque club déjà sélectionné (pour l'affichage).
@@ -59,6 +68,58 @@ export default function Bonus() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (loading) return <div className="loading-screen">Chargement...</div>;
+
+  // Bonus verrouillés : vue figée en lecture seule, aucune modification
+  // possible, quel que soit le chemin emprunté pour arriver sur cet écran.
+  if (locked) {
+    return (
+      <div className="app-shell">
+        <header style={{ padding: '26px 20px 4px' }}>
+          <div className="eyebrow" style={{ color: 'var(--lock)' }}>Verrouillés</div>
+          <h1>Bonus</h1>
+        </header>
+
+        <div className="card" style={{ textAlign: 'center', color: 'var(--lock)', fontSize: 12.5 }}>
+          🔒 Les bonus avant-saison sont verrouillés — plus aucune modification possible.
+        </div>
+
+        <div className="section-label">Top 8 de la phase de ligue</div>
+        <div className="card">
+          {picks.top8.filter(Boolean).length === 0 ? (
+            <div style={{ color: 'var(--navy-soft)', fontSize: 13 }}>Tu n'avais rien renseigné.</div>
+          ) : (
+            picks.top8.map((clubName, rank) => clubName && (
+              <div key={rank} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
+                {crests[clubName] ? (
+                  <img src={crests[clubName]} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />
+                ) : (
+                  <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(15,31,61,0.08)' }} />
+                )}
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 }}>{rank + 1}. {clubName}</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="section-label">Vainqueur & Finaliste</div>
+        <div className="card">
+          <ReadOnlyClubLine label="Vainqueur" value={picks.winner} crestUrl={picks.winner ? crests[picks.winner] : null} />
+          <ReadOnlyClubLine label="Finaliste" value={picks.finalist} crestUrl={picks.finalist ? crests[picks.finalist] : null} />
+        </div>
+
+        <div className="section-label">Meilleur buteur</div>
+        <div className="card">
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 14 }}>
+            {picks.topScorer || <span style={{ color: 'var(--navy-soft)' }}>Tu n'avais rien renseigné.</span>}
+          </div>
+        </div>
+
+        <BottomNav />
+      </div>
+    );
   }
 
   return (
@@ -161,5 +222,26 @@ function ClubSlotButton({ placeholder, value, crestUrl, onClick }) {
       ) : null}
       <span>{value || placeholder}</span>
     </button>
+  );
+}
+
+/** Ligne figée (lecture seule) affichant un club choisi, avec son écusson. */
+function ReadOnlyClubLine({ label, value, crestUrl }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
+      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'var(--navy-soft)', width: 70, flexShrink: 0 }}>{label}</div>
+      {value ? (
+        <>
+          {crestUrl ? (
+            <img src={crestUrl} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />
+          ) : (
+            <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(15,31,61,0.08)' }} />
+          )}
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 14 }}>{value}</span>
+        </>
+      ) : (
+        <span style={{ color: 'var(--navy-soft)', fontSize: 13 }}>Non renseigné</span>
+      )}
+    </div>
   );
 }

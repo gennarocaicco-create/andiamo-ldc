@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import { fetchAllMatches } from '../services/matches.js';
 import { fetchPlayerLeaderboard } from '../services/players.js';
+import { fetchCommunityPicks } from '../services/communityPicks.js';
 import { signOut } from '../services/auth.js';
+import ScorePickersSheet from '../components/ScorePickersSheet.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 
 export default function Home() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const [nextMatch, setNextMatch] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [myRank, setMyRank] = useState(null);
+  const [communityPicks, setCommunityPicks] = useState([]);
+  const [openGroup, setOpenGroup] = useState(null); // { title, pseudos } | null
   const [loading, setLoading] = useState(true);
 
   async function handleLogout() {
@@ -22,14 +24,18 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [matches, players] = await Promise.all([fetchAllMatches(), fetchPlayerLeaderboard()]);
+      const players = await fetchPlayerLeaderboard();
       if (cancelled) return;
 
-      const upcoming = matches.find((m) => m.status === 'scheduled');
-      setNextMatch(upcoming || null);
       setLeaderboard(players.slice(0, 5));
       const myIndex = players.findIndex((p) => p.id === profile?.id);
       setMyRank(myIndex >= 0 ? { rank: myIndex + 1, total: players.length, ...players[myIndex] } : null);
+
+      const playersById = new Map(players.map((p) => [p.id, p]));
+      const picks = await fetchCommunityPicks(playersById);
+      if (cancelled) return;
+      setCommunityPicks(picks);
+
       setLoading(false);
     }
     load();
@@ -62,24 +68,41 @@ export default function Home() {
         )}
       </div>
 
-      {nextMatch ? (
-        <div className="card" style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: 'var(--navy-soft)', textTransform: 'uppercase' }}>
-                Prochain match
-              </div>
-              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14, marginTop: 4 }}>
-                {nextMatch.homeClub} — {nextMatch.awayClub}
-              </div>
-            </div>
-            <Link to={`/matchs/${nextMatch.id}`} className="btn btn-primary">Pronostiquer</Link>
-          </div>
+      <div className="section-label">Pronostics de la communauté</div>
+      {communityPicks.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', color: 'var(--navy-soft)', fontSize: 13 }}>
+          Aucun match verrouillé pour l'instant.
         </div>
       ) : (
-        <div className="card" style={{ marginTop: 16, textAlign: 'center', color: 'var(--navy-soft)', fontSize: 13 }}>
-          Aucun match à venir pour l'instant.
-        </div>
+        communityPicks.map((match) => (
+          <div className="card" key={match.matchId}>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
+              {match.homeClub} — {match.awayClub}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {match.scoreGroups.map((group) => (
+                <button
+                  key={group.score}
+                  onClick={() => setOpenGroup({
+                    title: `${match.homeClub} — ${match.awayClub} · ${group.score}`,
+                    pseudos: group.pseudos,
+                  })}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '7px 11px', borderRadius: 20,
+                    background: 'rgba(27,63,160,0.07)', border: 'none', cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, fontWeight: 600, color: 'var(--blue)' }}>
+                    {group.score}
+                  </span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: 'var(--navy-soft)' }}>
+                    {group.pseudos.length}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))
       )}
 
       <div className="section-label">Classement</div>
@@ -131,6 +154,14 @@ export default function Home() {
       </div>
 
       <BottomNav />
+
+      {openGroup && (
+        <ScorePickersSheet
+          title={openGroup.title}
+          pseudos={openGroup.pseudos}
+          onClose={() => setOpenGroup(null)}
+        />
+      )}
     </div>
   );
 }

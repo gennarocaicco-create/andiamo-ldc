@@ -65,15 +65,18 @@ export default function Players() {
                 10 derniers matchs
               </div>
               {(recent[player.id] || []).map((prediction) => (
-                <div key={prediction.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed rgba(15,31,61,0.08)', fontSize: 12.5 }}>
-                  <span>{prediction.predictedScore.home}-{prediction.predictedScore.away}</span>
+                <div key={prediction.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px dashed rgba(15,31,61,0.08)', fontSize: 12.5, gap: 8 }}>
+                  <span style={{ flex: 1, fontFamily: "'Space Grotesk', sans-serif" }}>{prediction.homeClub} — {prediction.awayClub}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>
+                    {prediction.predictedScore.home}-{prediction.predictedScore.away}
+                  </span>
                   <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: 'var(--navy-soft)' }}>
                     +{prediction.points ?? 0} pt{(prediction.points ?? 0) > 1 ? 's' : ''}
                   </span>
                 </div>
               ))}
               {(recent[player.id] || []).length === 0 && (
-                <div style={{ fontSize: 12, color: 'var(--navy-soft)' }}>Aucun pronostic joué pour l'instant.</div>
+                <div style={{ fontSize: 12, color: 'var(--navy-soft)' }}>Aucun match verrouillé pour l'instant.</div>
               )}
             </div>
           )}

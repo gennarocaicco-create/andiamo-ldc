@@ -1,1 +1,0 @@
-import{l as t,m as o,q as e,o as r,b as c}from"./index-CaNtEhH1.js";async function p(){const n=e(o(c,"clubs"),r("points","desc"));return(await t(n)).docs.map(s=>({id:s.id,...s.data()}))}async function d(){return(await t(o(c,"clubs"))).docs.map(a=>a.data().name).sort((a,s)=>a.localeCompare(s,"fr"))}export{d as a,p as f};

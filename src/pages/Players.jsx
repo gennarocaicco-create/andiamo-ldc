@@ -10,18 +10,22 @@ import { computeBonusBreakdown } from '../services/bonusScoring.js';
 import { getClubCrestUrl } from '../services/clubCrests.js';
 import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
+import { getPageCache, setPageCache } from '../utils/pageCache.js';
+
+const CACHE_KEY = 'players';
 
 export default function Players() {
-  const [players, setPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getPageCache(CACHE_KEY);
+  const [players, setPlayers] = useState(cached?.players ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [openId, setOpenId] = useState(null);
   const [recent, setRecent] = useState({});
   const [bonusInfo, setBonusInfo] = useState({}); // playerId -> { picks, breakdown, showDetail }
   const [crests, setCrests] = useState({});
 
   // Chargées une seule fois, réutilisées pour calculer le bonus de chaque joueur.
-  const [matches, setMatches] = useState([]);
-  const [bonusResults, setBonusResults] = useState(null);
+  const [matches, setMatches] = useState(cached?.matches ?? []);
+  const [bonusResults, setBonusResults] = useState(cached?.bonusResults ?? null);
 
   async function load() {
     const [playerList, matchList, results] = await Promise.all([
@@ -32,6 +36,7 @@ export default function Players() {
     setPlayers(playerList);
     setMatches(matchList);
     setBonusResults(results);
+    setPageCache(CACHE_KEY, { players: playerList, matches: matchList, bonusResults: results });
     // Les données par joueur (déjà ouvertes) peuvent être devenues obsolètes
     // (nouveau score, verrouillage, etc.) — on les recalculera à la prochaine
     // ouverture plutôt que de garder d'anciennes valeurs affichées.
@@ -109,7 +114,9 @@ export default function Players() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 500, fontSize: 14 }}>{player.pseudo}</div>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: 'var(--navy-soft)' }}>{player.exactCount} scores exacts</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: 'var(--navy-soft)' }}>
+                  {player.exactCount} scores exacts · {player.correctOnlyCount} bons résultats
+                </div>
                 {player.message && (
                   <div style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontStyle: 'italic', fontSize: 10.5, color: '#8A6A16', marginTop: 3 }}>
                     ★ {player.message}

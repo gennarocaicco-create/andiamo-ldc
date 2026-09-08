@@ -78,9 +78,16 @@ export default function Matches() {
                   {match.score?.home} – {match.score?.away}
                 </div>
               ) : !isLocked ? (
-                <Link to={`/matchs/${match.id}`} className="btn btn-primary">
-                  {myPrediction ? 'Modifier' : 'Pronostiquer'}
-                </Link>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {myPrediction && (
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600, color: 'var(--blue)' }}>
+                      {myPrediction.predictedScore.home}-{myPrediction.predictedScore.away}
+                    </div>
+                  )}
+                  <Link to={`/matchs/${match.id}`} className="btn btn-primary">
+                    {myPrediction ? 'Modifier' : 'Pronostiquer'}
+                  </Link>
+                </div>
               ) : (
                 myPrediction && (
                   <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: 'var(--gold)' }}>

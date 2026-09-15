@@ -4,7 +4,7 @@ import { fetchAllMatches } from '../services/matches.js';
 import { submitMatchScore } from '../services/adminScores.js';
 import { fetchPlayerLeaderboard, setPlayerMessage } from '../services/players.js';
 import { fetchRegistrationStatus, setRegistrationStatus } from '../services/registration.js';
-import { fetchPreseasonLockStatus, lockPreseasonBonuses, unlockPreseasonBonuses } from '../services/preseasonLock.js';
+import { fetchBonusLocks, setBonusLock, BONUS_CATEGORIES } from '../services/bonusLocks.js';
 import { fetchAuditLog, logAdminAction } from '../services/auditLog.js';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase.js';
@@ -58,14 +58,21 @@ export default function Admin() {
   );
 }
 
+const BONUS_LABELS = {
+  top8: 'Top 8',
+  winner: 'Vainqueur',
+  finalist: 'Finaliste',
+  topScorer: 'Meilleur buteur',
+};
+
 function Overview({ actor }) {
   const [isOpen, setIsOpen] = useState(true);
-  const [bonusLocked, setBonusLocked] = useState(false);
+  const [bonusLocks, setBonusLocks] = useState({ top8: false, winner: false, finalist: false, topScorer: false });
   const [players, setPlayers] = useState([]);
 
   useEffect(() => {
     fetchRegistrationStatus().then(setIsOpen);
-    fetchPreseasonLockStatus().then(setBonusLocked);
+    fetchBonusLocks().then(setBonusLocks);
     fetchPlayerLeaderboard().then(setPlayers);
   }, []);
 
@@ -75,16 +82,12 @@ function Overview({ actor }) {
     setIsOpen(next);
   }
 
-  async function toggleBonusLock() {
-    const next = !bonusLocked;
-    if (next) {
-      await lockPreseasonBonuses();
-    } else {
-      await unlockPreseasonBonuses();
-    }
-    setBonusLocked(next);
+  async function toggleBonusCategory(category) {
+    const next = !bonusLocks[category];
+    await setBonusLock(category, next);
+    setBonusLocks((prev) => ({ ...prev, [category]: next }));
     if (actor) {
-      await logAdminAction(actor, 'lock', next ? 'Bonus avant-saison verrouillés (Top 8, Vainqueur, Finaliste, Buteur)' : 'Bonus avant-saison déverrouillés');
+      await logAdminAction(actor, 'lock', `${BONUS_LABELS[category]} ${next ? 'verrouillé' : 'déverrouillé'}`);
     }
   }
 
@@ -115,25 +118,31 @@ function Overview({ actor }) {
         </button>
       </div>
 
-      <div className="card" style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13.5 }}>
-            {bonusLocked ? 'Bonus avant-saison verrouillés' : 'Bonus avant-saison ouverts'}
+      <div className="section-label">Bonus avant-saison</div>
+      {BONUS_CATEGORIES.map((category) => {
+        const locked = bonusLocks[category];
+        return (
+          <div key={category} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13.5 }}>
+                {BONUS_LABELS[category]}
+              </div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: locked ? 'var(--lock)' : 'var(--navy-soft)' }}>
+                {locked ? 'Verrouillé' : 'Modifiable par les joueurs'}
+              </div>
+            </div>
+            <button
+              onClick={() => toggleBonusCategory(category)}
+              style={{
+                width: 46, height: 26, borderRadius: 14, border: 'none', cursor: 'pointer', position: 'relative',
+                background: locked ? 'var(--lock)' : 'var(--win)',
+              }}
+            >
+              <div style={{ position: 'absolute', top: 3, left: locked ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+            </button>
           </div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: bonusLocked ? 'var(--lock)' : 'var(--navy-soft)' }}>
-            Top 8 · Vainqueur · Finaliste · Meilleur buteur
-          </div>
-        </div>
-        <button
-          onClick={toggleBonusLock}
-          style={{
-            width: 46, height: 26, borderRadius: 14, border: 'none', cursor: 'pointer', position: 'relative',
-            background: bonusLocked ? 'var(--lock)' : 'var(--win)',
-          }}
-        >
-          <div style={{ position: 'absolute', top: 3, left: bonusLocked ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
-        </button>
-      </div>
+        );
+      })}
     </>
   );
 }

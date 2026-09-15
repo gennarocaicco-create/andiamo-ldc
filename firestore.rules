@@ -1,9 +1,4 @@
 rules_version = '2';
-
-// Règles de sécurité Firestore — Andiamo-LDC (V1, sans Cloud Functions)
-// À coller dans Firebase Console → Firestore Database → Règles,
-// ou déployer avec `firebase deploy --only firestore:rules`.
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -25,6 +20,13 @@ service cloud.firestore {
 
     function isOwner() {
       return isSignedIn() && myRole() == 'owner';
+    }
+
+    // Vrai si la catégorie de bonus donnée ('top8'|'winner'|'finalist'|'topScorer')
+    // a été verrouillée par un admin dans settings/bonusLocks.
+    function isBonusLocked(category) {
+      return exists(/databases/$(database)/documents/settings/bonusLocks)
+        && get(/databases/$(database)/documents/settings/bonusLocks).data[category] == true;
     }
 
     // ---- pseudos (réservation de pseudo, vérifiée avant la création de compte) ----
@@ -79,16 +81,23 @@ service cloud.firestore {
     // ---- seasonBonusPicks ----
     match /seasonBonusPicks/{uid} {
       allow read: if isSignedIn();
-      // Tant qu'aucune date de verrouillage n'a été définie par un admin
-      // (document settings/preseasonLock absent), l'enregistrement reste
-      // ouvert par défaut — évite un blocage si ce réglage n'a jamais été
-      // configuré.
-      allow create, update: if isSignedIn()
+
+      // Premier enregistrement (le document n'existe pas encore) : ouvert,
+      // peu importe l'état des verrous — un joueur doit toujours pouvoir
+      // faire sa toute première sauvegarde.
+      allow create: if isSignedIn() && request.auth.uid == uid;
+
+      // Modification d'un pronostic déjà enregistré : chaque catégorie
+      // (top8, winner, finalist, topScorer) ne peut changer de valeur QUE
+      // si elle n'est pas verrouillée — les autres catégories restent
+      // modifiables indépendamment.
+      allow update: if isSignedIn()
         && request.auth.uid == uid
-        && (
-          !exists(/databases/$(database)/documents/settings/preseasonLock) ||
-          request.time < get(/databases/$(database)/documents/settings/preseasonLock).data.locksAt
-        );
+        && (request.resource.data.top8 == resource.data.top8 || !isBonusLocked('top8'))
+        && (request.resource.data.winner == resource.data.winner || !isBonusLocked('winner'))
+        && (request.resource.data.finalist == resource.data.finalist || !isBonusLocked('finalist'))
+        && (request.resource.data.topScorer == resource.data.topScorer || !isBonusLocked('topScorer'));
+
       allow write: if isAdmin();
     }
 
@@ -98,17 +107,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // ---- settings (verrouillage inscriptions, dates de verrouillage) ----
-    match /settings/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
     // ---- auditLog (journal des actions admin, visible par le owner seul) ----
     match /auditLog/{entryId} {
       allow read: if isOwner();
       allow create: if isAdmin() && request.resource.data.actorUid == request.auth.uid;
       allow update, delete: if false; // le journal ne se modifie ni ne se supprime
+    }
+
+    // ---- settings (verrouillage inscriptions, dates de verrouillage) ----
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

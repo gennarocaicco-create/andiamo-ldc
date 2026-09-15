@@ -2,18 +2,32 @@ import { collection, getDocs, query, where, doc, getDoc, updateDoc } from 'fireb
 import { db } from '../lib/firebase.js';
 import { rankPlayers, tieBreakValue } from '../utils/scoring.js';
 import { logAdminAction } from './auditLog.js';
+import { computeBonusBreakdown } from './bonusScoring.js';
 
 /**
- * Calcule le classement des joueurs à partir de leurs pronostics.
- * Fait exprès de tout recalculer à l'affichage plutôt que de stocker un
- * "total" séparé — simple et fiable tant que le nombre de joueurs reste
- * petit (50-100).
+ * Calcule le classement des joueurs à partir de leurs pronostics, EN
+ * INCLUANT le bonus (journée parfaite + bonus avant-saison une fois les
+ * résultats connus) dans le total de points affiché — pas seulement les
+ * points match par match. Le détail (breakdown) est calculé ici pour tout
+ * le monde en une seule fois, et réutilisé tel quel par l'écran Joueurs
+ * quand on déroule la fiche d'un joueur (pas besoin de le recalculer).
  */
 export async function fetchPlayerLeaderboard() {
-  const usersSnap = await getDocs(collection(db, 'users'));
-  const players = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const [usersSnap, predictionsSnap, matchesSnap, bonusPicksSnap, bonusResultsSnap] = await Promise.all([
+    getDocs(collection(db, 'users')),
+    getDocs(collection(db, 'predictions')),
+    getDocs(collection(db, 'matches')),
+    getDocs(collection(db, 'seasonBonusPicks')),
+    getDoc(doc(db, 'seasonBonusResults', 'current')),
+  ]);
 
-  const predictionsSnap = await getDocs(collection(db, 'predictions'));
+  const players = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const matches = matchesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const bonusResults = bonusResultsSnap.exists() ? bonusResultsSnap.data() : null;
+
+  const bonusPicksByUid = new Map();
+  bonusPicksSnap.forEach((d) => bonusPicksByUid.set(d.id, d.data()));
+
   const predictionsByUser = new Map();
   predictionsSnap.forEach((d) => {
     const prediction = d.data();
@@ -24,7 +38,7 @@ export async function fetchPlayerLeaderboard() {
 
   const withScores = players.map((player) => {
     const myPredictions = predictionsByUser.get(player.id) || [];
-    const points = myPredictions.reduce((sum, p) => sum + (p.points || 0), 0);
+    const matchPoints = myPredictions.reduce((sum, p) => sum + (p.points || 0), 0);
     const tieBreak = tieBreakValue(myPredictions.map((p) => ({
       exact: !!p.exact,
       correctResult: !!p.correctResult,
@@ -32,7 +46,25 @@ export async function fetchPlayerLeaderboard() {
     const exactCount = myPredictions.filter((p) => p.exact).length;
     const correctOnlyCount = myPredictions.filter((p) => p.correctResult && !p.exact).length;
 
-    return { ...player, points, tieBreak, exactCount, correctOnlyCount, predictionsCount: myPredictions.length };
+    const bonusBreakdown = computeBonusBreakdown({
+      matches,
+      predictions: myPredictions,
+      bonusPicks: bonusPicksByUid.get(player.id) || null,
+      bonusResults,
+    });
+
+    return {
+      ...player,
+      points: matchPoints + bonusBreakdown.total,
+      matchPoints,
+      bonusTotal: bonusBreakdown.total,
+      bonusBreakdown,
+      bonusPicks: bonusPicksByUid.get(player.id) || null,
+      tieBreak,
+      exactCount,
+      correctOnlyCount,
+      predictionsCount: myPredictions.length,
+    };
   });
 
   return rankPlayers(withScores);

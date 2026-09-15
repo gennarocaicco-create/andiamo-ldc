@@ -3,32 +3,43 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { fetchMyBonusPicks, saveMyBonusPicks } from '../services/bonus.js';
 import { fetchClubNames } from '../services/clubs.js';
 import { getClubCrestUrl } from '../services/clubCrests.js';
-import { fetchPreseasonLockStatus } from '../services/preseasonLock.js';
+import { fetchBonusLocks } from '../services/bonusLocks.js';
 import ClubPickerSheet from '../components/ClubPickerSheet.jsx';
 import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
+import { getPageCache, setPageCache } from '../utils/pageCache.js';
+
+const CACHE_KEY = 'bonus';
+const EMPTY_PICKS = { top8: [], winner: '', finalist: '', topScorer: '' };
+const EMPTY_LOCKS = { top8: false, winner: false, finalist: false, topScorer: false };
 
 export default function Bonus() {
   const { profile } = useAuth();
-  const [picks, setPicks] = useState({ top8: [], winner: '', finalist: '', topScorer: '' });
-  const [clubNames, setClubNames] = useState([]);
+  const cached = getPageCache(CACHE_KEY);
+  const [picks, setPicks] = useState(cached?.picks ?? EMPTY_PICKS);
+  const [clubNames, setClubNames] = useState(cached?.clubNames ?? []);
   const [crests, setCrests] = useState({});
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState('');
-  const [locked, setLocked] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [locks, setLocks] = useState(cached?.locks ?? EMPTY_LOCKS);
+  const [loading, setLoading] = useState(!cached);
   // null = fermé, 'winner' | 'finalist' | {top8: index} = ouvert pour ce champ
   const [pickerFor, setPickerFor] = useState(null);
 
   async function load() {
-    const [existing, names, isLocked] = await Promise.all([
+    const [existing, names, bonusLocks] = await Promise.all([
       fetchMyBonusPicks(profile.id),
       fetchClubNames(),
-      fetchPreseasonLockStatus(),
+      fetchBonusLocks(),
     ]);
-    if (existing) setPicks({ top8: existing.top8 || [], winner: existing.winner || '', finalist: existing.finalist || '', topScorer: existing.topScorer || '' });
+    const nextPicks = existing
+      ? { top8: existing.top8 || [], winner: existing.winner || '', finalist: existing.finalist || '', topScorer: existing.topScorer || '' }
+      : EMPTY_PICKS;
+
+    setPicks(nextPicks);
     setClubNames(names);
-    setLocked(isLocked);
+    setLocks(bonusLocks);
+    setPageCache(CACHE_KEY, { picks: nextPicks, clubNames: names, locks: bonusLocks });
   }
 
   useEffect(() => {
@@ -68,7 +79,7 @@ export default function Bonus() {
       await saveMyBonusPicks(profile.id, picks);
       setSavedMessage('Pronostics enregistrés.');
     } catch (err) {
-      setSavedMessage('Impossible d\'enregistrer — les bonus sont peut-être déjà verrouillés.');
+      setSavedMessage('Impossible d\'enregistrer — vérifie qu\'aucune des catégories modifiées n\'est verrouillée.');
     } finally {
       setSaving(false);
     }
@@ -76,57 +87,7 @@ export default function Bonus() {
 
   if (loading) return <div className="loading-screen">Chargement...</div>;
 
-  // Bonus verrouillés : vue figée en lecture seule, aucune modification
-  // possible, quel que soit le chemin emprunté pour arriver sur cet écran.
-  if (locked) {
-    return (
-      <div className="app-shell">
-        <PullToRefresh onRefresh={load}>
-        <header style={{ padding: '26px 20px 4px' }}>
-          <div className="eyebrow" style={{ color: 'var(--lock)' }}>Verrouillés</div>
-          <h1>Bonus</h1>
-        </header>
-
-        <div className="card" style={{ textAlign: 'center', color: 'var(--lock)', fontSize: 12.5 }}>
-          🔒 Les bonus avant-saison sont verrouillés — plus aucune modification possible.
-        </div>
-
-        <div className="section-label">Top 8 de la phase de ligue</div>
-        <div className="card">
-          {picks.top8.filter(Boolean).length === 0 ? (
-            <div style={{ color: 'var(--navy-soft)', fontSize: 13 }}>Tu n'avais rien renseigné.</div>
-          ) : (
-            picks.top8.map((clubName, rank) => clubName && (
-              <div key={rank} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
-                {crests[clubName] ? (
-                  <img src={crests[clubName]} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />
-                ) : (
-                  <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(15,31,61,0.08)' }} />
-                )}
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 }}>{rank + 1}. {clubName}</span>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="section-label">Vainqueur & Finaliste</div>
-        <div className="card">
-          <ReadOnlyClubLine label="Vainqueur" value={picks.winner} crestUrl={picks.winner ? crests[picks.winner] : null} />
-          <ReadOnlyClubLine label="Finaliste" value={picks.finalist} crestUrl={picks.finalist ? crests[picks.finalist] : null} />
-        </div>
-
-        <div className="section-label">Meilleur buteur</div>
-        <div className="card">
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 14 }}>
-            {picks.topScorer || <span style={{ color: 'var(--navy-soft)' }}>Tu n'avais rien renseigné.</span>}
-          </div>
-        </div>
-        </PullToRefresh>
-
-        <BottomNav />
-      </div>
-    );
-  }
+  const allLocked = locks.top8 && locks.winner && locks.finalist && locks.topScorer;
 
   return (
     <div className="app-shell">
@@ -138,62 +99,108 @@ export default function Bonus() {
 
       <div className="section-label">Avant-saison</div>
 
+      {/* Top 8 */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Top 8 de la phase de ligue</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Top 8 de la phase de ligue</div>
+            {locks.top8 && <LockBadge />}
+          </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: '#8A6A16' }}>jusqu'à 16 pts</div>
         </div>
-        {[0, 1, 2, 3, 4, 5, 6, 7].map((rank) => (
-          <ClubSlotButton
-            key={rank}
-            placeholder={`Club rang ${rank + 1}`}
-            value={picks.top8[rank]}
-            crestUrl={picks.top8[rank] ? crests[picks.top8[rank]] : null}
-            onClick={() => setPickerFor({ top8: rank })}
-          />
-        ))}
+        {locks.top8 ? (
+          picks.top8.filter(Boolean).length === 0 ? (
+            <div style={{ color: 'var(--navy-soft)', fontSize: 13 }}>Tu n'avais rien renseigné.</div>
+          ) : (
+            picks.top8.map((clubName, rank) => clubName && (
+              <ReadOnlyClubRow key={rank} label={`${rank + 1}.`} value={clubName} crestUrl={crests[clubName]} />
+            ))
+          )
+        ) : (
+          [0, 1, 2, 3, 4, 5, 6, 7].map((rank) => (
+            <ClubSlotButton
+              key={rank}
+              placeholder={`Club rang ${rank + 1}`}
+              value={picks.top8[rank]}
+              crestUrl={picks.top8[rank] ? crests[picks.top8[rank]] : null}
+              onClick={() => setPickerFor({ top8: rank })}
+            />
+          ))
+        )}
       </div>
 
+      {/* Vainqueur */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Vainqueur</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Vainqueur</div>
+            {locks.winner && <LockBadge />}
+          </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: '#8A6A16' }}>+12 pts</div>
         </div>
-        <ClubSlotButton
-          placeholder="Club vainqueur"
-          value={picks.winner}
-          crestUrl={picks.winner ? crests[picks.winner] : null}
-          onClick={() => setPickerFor('winner')}
-        />
+        {locks.winner ? (
+          <ReadOnlyClubRow value={picks.winner} crestUrl={picks.winner ? crests[picks.winner] : null} />
+        ) : (
+          <ClubSlotButton
+            placeholder="Club vainqueur"
+            value={picks.winner}
+            crestUrl={picks.winner ? crests[picks.winner] : null}
+            onClick={() => setPickerFor('winner')}
+          />
+        )}
       </div>
 
+      {/* Finaliste */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Finaliste</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Finaliste</div>
+            {locks.finalist && <LockBadge />}
+          </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: '#8A6A16' }}>+10 pts</div>
         </div>
-        <ClubSlotButton
-          placeholder="Club finaliste"
-          value={picks.finalist}
-          crestUrl={picks.finalist ? crests[picks.finalist] : null}
-          onClick={() => setPickerFor('finalist')}
-        />
+        {locks.finalist ? (
+          <ReadOnlyClubRow value={picks.finalist} crestUrl={picks.finalist ? crests[picks.finalist] : null} />
+        ) : (
+          <ClubSlotButton
+            placeholder="Club finaliste"
+            value={picks.finalist}
+            crestUrl={picks.finalist ? crests[picks.finalist] : null}
+            onClick={() => setPickerFor('finalist')}
+          />
+        )}
       </div>
 
+      {/* Meilleur buteur */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Meilleur buteur</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Meilleur buteur</div>
+            {locks.topScorer && <LockBadge />}
+          </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: '#8A6A16' }}>+10 pts</div>
         </div>
-        <input className="field-input" placeholder="Nom du joueur" value={picks.topScorer} onChange={(e) => setPicks({ ...picks, topScorer: e.target.value })} />
+        {locks.topScorer ? (
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 14 }}>
+            {picks.topScorer || <span style={{ color: 'var(--navy-soft)' }}>Tu n'avais rien renseigné.</span>}
+          </div>
+        ) : (
+          <input className="field-input" placeholder="Nom du joueur" value={picks.topScorer} onChange={(e) => setPicks({ ...picks, topScorer: e.target.value })} />
+        )}
       </div>
 
-      <div style={{ padding: '0 16px' }}>
-        <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-block">
-          {saving ? 'Enregistrement...' : 'Enregistrer mes pronostics bonus'}
-        </button>
-        {savedMessage && <div className="error-text" style={{ textAlign: 'center' }}>{savedMessage}</div>}
-      </div>
+      {allLocked ? (
+        <div className="card" style={{ textAlign: 'center', color: 'var(--lock)', fontSize: 12.5 }}>
+          🔒 Tous les bonus avant-saison sont verrouillés.
+        </div>
+      ) : (
+        <div style={{ padding: '0 16px' }}>
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-block">
+            {saving ? 'Enregistrement...' : 'Enregistrer mes pronostics bonus'}
+          </button>
+          {savedMessage && <div className="error-text" style={{ textAlign: 'center' }}>{savedMessage}</div>}
+        </div>
+      )}
       </PullToRefresh>
 
       <BottomNav />
@@ -206,6 +213,12 @@ export default function Bonus() {
         />
       )}
     </div>
+  );
+}
+
+function LockBadge() {
+  return (
+    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, color: 'var(--lock)' }}>🔒</span>
   );
 }
 
@@ -234,10 +247,12 @@ function ClubSlotButton({ placeholder, value, crestUrl, onClick }) {
 }
 
 /** Ligne figée (lecture seule) affichant un club choisi, avec son écusson. */
-function ReadOnlyClubLine({ label, value, crestUrl }) {
+function ReadOnlyClubRow({ label, value, crestUrl }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
-      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'var(--navy-soft)', width: 70, flexShrink: 0 }}>{label}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
+      {label && (
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'var(--navy-soft)', width: 18, flexShrink: 0 }}>{label}</div>
+      )}
       {value ? (
         <>
           {crestUrl ? (

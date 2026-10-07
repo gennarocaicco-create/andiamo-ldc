@@ -1,24 +1,33 @@
 import { useEffect, useState } from 'react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase.js';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import { fetchAllMatches, fetchMyPrediction } from '../services/matches.js';
+import { fetchAllMatches } from '../services/matches.js';
 import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
+import { getPageCache, setPageCache } from '../utils/pageCache.js';
+
+const CACHE_KEY = 'matches';
 
 export default function Matches() {
   const { profile } = useAuth();
-  const [matches, setMatches] = useState([]);
-  const [myPredictions, setMyPredictions] = useState({});
-  const [loading, setLoading] = useState(true);
+  const cached = getPageCache(CACHE_KEY);
+  const [matches, setMatches] = useState(cached?.matches ?? []);
+  const [myPredictions, setMyPredictions] = useState(cached?.myPredictions ?? {});
+  const [loading, setLoading] = useState(!cached);
+  const [selectedDay, setSelectedDay] = useState(cached?.selectedDay ?? null);
 
   async function load() {
     const list = await fetchAllMatches();
-    setMatches(list);
 
-    const entries = await Promise.all(
-      list.map(async (m) => [m.id, await fetchMyPrediction(m.id, profile.id)])
-    );
-    setMyPredictions(Object.fromEntries(entries.filter(([, v]) => v)));
+    // Une seule requête pour tous mes pronostics (au lieu d'une par match).
+    const snap = await getDocs(query(collection(db, 'predictions'), where('uid', '==', profile.id)));
+    const predictions = Object.fromEntries(snap.docs.map((d) => [d.data().matchId, { id: d.id, ...d.data() }]));
+
+    setMatches(list);
+    setMyPredictions(predictions);
+    setPageCache(CACHE_KEY, { matches: list, myPredictions: predictions, selectedDay });
   }
 
   useEffect(() => {
@@ -37,6 +46,15 @@ export default function Matches() {
 
   const now = Date.now();
 
+  // Journées disponibles ; par défaut : la première qui n'est pas entièrement terminée.
+  const days = [...new Set(matches.map((m) => m.matchday).filter((d) => d != null))].sort((a, b) => a - b);
+  const defaultDay =
+    days.find((d) => matches.some((m) => m.matchday === d && m.status !== 'finished' && m.status !== 'cancelled')) ??
+    days[days.length - 1] ??
+    null;
+  const activeDay = selectedDay ?? defaultDay;
+  const visibleMatches = activeDay == null ? matches : matches.filter((m) => m.matchday === activeDay);
+
   return (
     <div className="app-shell">
       <PullToRefresh onRefresh={load}>
@@ -45,9 +63,33 @@ export default function Matches() {
         <h1>Matchs</h1>
       </header>
 
-      <div className="section-label">Tous les matchs</div>
+      {days.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', padding: '10px 16px 4px' }}>
+          {days.map((d) => (
+            <button
+              key={d}
+              onClick={() => setSelectedDay(d)}
+              style={{
+                flex: '0 0 auto',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11.5,
+                padding: '7px 13px',
+                borderRadius: 20,
+                cursor: 'pointer',
+                border: '1.3px solid rgba(27,63,160,0.2)',
+                background: d === activeDay ? 'var(--blue)' : '#fff',
+                color: d === activeDay ? '#fff' : 'var(--blue)',
+              }}
+            >
+              J{d}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {matches.map((match) => {
+      <div className="section-label">{activeDay != null ? `Journée ${activeDay}` : 'Tous les matchs'}</div>
+
+      {visibleMatches.map((match) => {
         const kickoff = match.kickoffAt?.toDate ? match.kickoffAt.toDate() : null;
         const locksAt = match.locksAt?.toDate ? match.locksAt.toDate() : null;
         const isLocked = locksAt ? now >= locksAt.getTime() : false;

@@ -7,7 +7,8 @@ import { fetchRegistrationStatus, setRegistrationStatus } from '../services/regi
 import { fetchBonusLocks, setBonusLock, BONUS_CATEGORIES } from '../services/bonusLocks.js';
 import { fetchAuditLog, logAdminAction } from '../services/auditLog.js';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase.js';
+import { db, functions } from '../lib/firebase.js';
+import { httpsCallable } from 'firebase/functions';
 import BottomNav from '../components/BottomNav.jsx';
 
 const TABS = ['Vue d\'ensemble', 'Scores', 'Joueurs', 'Calendrier'];
@@ -290,9 +291,36 @@ function PlayersTab({ isOwner, actor }) {
 }
 
 function CalendarTab() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState('');
+
+  async function handleImport() {
+    setBusy(true);
+    setResult('');
+    try {
+      const res = await httpsCallable(functions, 'importSchedule')();
+      const { received, written } = res.data;
+      setResult(`✓ ${received} matchs reçus de l'API, ${written} ajoutés ou mis à jour.`);
+    } catch (e) {
+      setResult(`Erreur : ${e.message}`);
+    }
+    setBusy(false);
+  }
+
   return (
-    <div className="card" style={{ textAlign: 'center', color: 'var(--navy-soft)', fontSize: 13 }}>
-      La gestion du calendrier (journées, bonus avant-saison) arrive dans une prochaine version.
+    <div className="card">
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14 }}>Calendrier des matchs</div>
+      <div style={{ fontSize: 12.5, color: 'var(--navy-soft)', margin: '8px 0 12px', lineHeight: 1.5 }}>
+        Toutes les journées sont chargées automatiquement toutes les 3 heures (nouveaux matchs, reports, annulations, changements d'horaire). Ce bouton force la mise à jour tout de suite.
+      </div>
+      <button
+        onClick={handleImport}
+        disabled={busy}
+        style={{ width: '100%', fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13, color: '#fff', background: 'var(--gold)', border: 'none', padding: 11, borderRadius: 10, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}
+      >
+        {busy ? 'Chargement...' : 'Charger le calendrier maintenant'}
+      </button>
+      {result && <div style={{ marginTop: 10, fontSize: 12.5 }}>{result}</div>}
     </div>
   );
 }

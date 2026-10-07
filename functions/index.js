@@ -5,7 +5,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
-import { fetchFixturesByDate, normalizeFixture } from './lib/apiFootball.js';
+import { fetchFixturesByDate, fetchSeasonFixtures, normalizeFixture, slugify } from './lib/apiFootball.js';
 import { scoreMatchPrediction } from './lib/scoring.js';
 
 initializeApp();
@@ -31,51 +31,119 @@ export const syncMatchScores = onSchedule(
   async () => {
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const fixtures = await fetchFixturesByDate(API_FOOTBALL_KEY.value(), today);
+    const res = await upsertFixtures(fixtures);
+    console.log(`Sync du jour (${today}) : ${res.written} mis à jour, ${res.skipped} ignoré(s).`);
+  }
+);
 
-    if (fixtures.length === 0) {
-      console.log(`Aucun match ce jour (${today}).`);
-      return;
+/**
+ * Écrit (ou met à jour) des matchs dans Firestore à partir de fixtures
+ * API-Football. Ne touche pas aux matchs corrigés à la main (manualOverride),
+ * ignore les tours à élimination directe (pas de journée), et n'écrit que
+ * ce qui a réellement changé. Si l'horaire change (match décalé), le
+ * verrouillage (30 min avant) est recalculé. Crée aussi les clubs manquants.
+ */
+async function upsertFixtures(fixtures) {
+  const existingSnap = await db.collection('matches').get();
+  const existing = new Map(existingSnap.docs.map((d) => [d.id, d.data()]));
+  const clubsSnap = await db.collection('clubs').get();
+  const knownClubs = new Set(clubsSnap.docs.map((d) => d.id));
+
+  let batch = db.batch();
+  let ops = 0;
+  let written = 0;
+  let skipped = 0;
+
+  for (const fixture of fixtures) {
+    const n = normalizeFixture(fixture);
+    if (n.matchday == null) { skipped += 1; continue; }
+
+    const prev = existing.get(n.matchId);
+    if (prev?.manualOverride) { skipped += 1; continue; }
+
+    const kickoffAt = new Date(n.kickoffTime);
+    const sameKickoff = prev?.kickoffAt?.toMillis?.() === kickoffAt.getTime();
+    const sameScore =
+      (prev?.score?.home ?? null) === (n.score?.home ?? null) &&
+      (prev?.score?.away ?? null) === (n.score?.away ?? null);
+
+    const unchanged =
+      prev &&
+      prev.status === n.status &&
+      prev.matchday === n.matchday &&
+      prev.homeClub === n.homeTeam &&
+      prev.awayClub === n.awayTeam &&
+      sameKickoff &&
+      sameScore;
+    if (unchanged) { skipped += 1; continue; }
+
+    const data = {
+      matchday: n.matchday,
+      homeClub: n.homeTeam,
+      awayClub: n.awayTeam,
+      status: n.status,
+      score: n.score,
+      kickoffAt,
+      syncedAt: FieldValue.serverTimestamp(),
+    };
+    if (!prev || !sameKickoff || !prev.locksAt) {
+      data.locksAt = new Date(kickoffAt.getTime() - 30 * 60 * 1000);
     }
+    if (!prev) data.manualOverride = false;
 
-    const batch = db.batch();
-    let updatedCount = 0;
+    batch.set(db.collection('matches').doc(n.matchId), data, { merge: true });
+    ops += 1;
+    written += 1;
 
-    for (const fixture of fixtures) {
-      const normalized = normalizeFixture(fixture);
-      const matchRef = db.collection('matches').doc(normalized.matchId);
-      const existingSnap = await matchRef.get();
-      const existing = existingSnap.data();
-
-      // Un admin a corrigé ce match à la main → on ne touche plus à rien
-      // automatiquement pour ce match.
-      if (existing?.manualOverride) {
-        continue;
+    for (const name of [n.homeTeam, n.awayTeam]) {
+      const clubId = slugify(name);
+      if (!knownClubs.has(clubId)) {
+        knownClubs.add(clubId);
+        batch.set(db.collection('clubs').doc(clubId), { name, points: 0, played: 0, form: [] });
+        ops += 1;
       }
-
-      const kickoffAt = new Date(normalized.kickoffTime);
-      const locksAt = new Date(kickoffAt.getTime() - 30 * 60 * 1000);
-
-      batch.set(
-        matchRef,
-        {
-          homeClub: normalized.homeTeam,
-          awayClub: normalized.awayTeam,
-          status: normalized.status,
-          score: normalized.score,
-          kickoffAt,
-          // Ne réécrit locksAt que s'il n'existe pas déjà (le seed.mjs l'a
-          // déjà calculé) — évite de le recalculer à chaque synchro.
-          ...(existing?.locksAt ? {} : { locksAt }),
-          syncedAt: FieldValue.serverTimestamp(),
-          manualOverride: false,
-        },
-        { merge: true }
-      );
-      updatedCount += 1;
     }
 
-    await batch.commit();
-    console.log(`Sync terminée : ${updatedCount} match(s) mis à jour pour le ${today}.`);
+    if (ops >= 400) { await batch.commit(); batch = db.batch(); ops = 0; }
+  }
+  if (ops > 0) await batch.commit();
+  return { written, skipped };
+}
+
+/**
+ * Calendrier complet : toutes les journées de la phase de ligue.
+ * Toutes les 3 heures : ajoute les nouveaux matchs, détecte les reports,
+ * annulations et changements d'horaire. (1 requête API par exécution.)
+ */
+export const syncSchedule = onSchedule(
+  {
+    schedule: 'every 3 hours',
+    secrets: [API_FOOTBALL_KEY],
+    timeZone: 'Europe/Brussels',
+  },
+  async () => {
+    const fixtures = await fetchSeasonFixtures(API_FOOTBALL_KEY.value());
+    const res = await upsertFixtures(fixtures);
+    console.log(`Calendrier : ${fixtures.length} match(s) reçus, ${res.written} écrits, ${res.skipped} inchangés/ignorés.`);
+  }
+);
+
+/**
+ * Même chose, mais à la demande : bouton « Charger le calendrier » dans
+ * Admin → Calendrier (réservé aux admins).
+ */
+export const importSchedule = onCall(
+  { region: 'europe-west1', secrets: [API_FOOTBALL_KEY] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Connexion requise.');
+    const callerSnap = await db.collection('users').doc(request.auth.uid).get();
+    const role = callerSnap.data()?.role;
+    if (role !== 'admin' && role !== 'owner') {
+      throw new HttpsError('permission-denied', 'Réservé aux admins.');
+    }
+    const fixtures = await fetchSeasonFixtures(API_FOOTBALL_KEY.value());
+    const res = await upsertFixtures(fixtures);
+    return { received: fixtures.length, written: res.written, skipped: res.skipped };
   }
 );
 

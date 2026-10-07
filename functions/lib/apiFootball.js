@@ -38,6 +38,76 @@ export async function fetchFixturesByDate(apiKey, date) {
 }
 
 /**
+ * Récupère TOUS les matchs de la saison (toutes les journées, une seule
+ * requête). Sert à charger le calendrier complet et à détecter les
+ * changements : report, annulation, nouvel horaire.
+ * @param {string} apiKey
+ * @returns {Promise<Array>} liste brute de fixtures API-Football
+ */
+export async function fetchSeasonFixtures(apiKey) {
+  const url = new URL(`https://${API_FOOTBALL_HOST}/fixtures`);
+  url.searchParams.set('league', CHAMPIONS_LEAGUE_ID);
+  url.searchParams.set('season', CURRENT_SEASON);
+
+  const response = await fetch(url, { headers: { 'x-apisports-key': apiKey } });
+  if (!response.ok) {
+    throw new Error(`API-Football a répondu ${response.status}: ${await response.text()}`);
+  }
+  const data = await response.json();
+  return data.response;
+}
+
+/**
+ * Extrait le numéro de journée de la phase de ligue depuis le libellé
+ * API-Football ("League Stage - 3" / "Regular Season - 3" → 3).
+ * Renvoie null pour les tours à élimination directe et les barrages.
+ */
+export function parseLeagueMatchday(round) {
+  const m = /^(?:League Stage|Regular Season)\s*-\s*(\d+)$/i.exec(round || '');
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Noms API-Football → noms utilisés dans l'app (ceux du seed), pour que
+ * le calendrier importé retombe sur les mêmes documents et les mêmes clubs.
+ * Les noms inconnus passent tels quels.
+ */
+const NAME_ALIASES = {
+  'inter': 'Inter Milan',
+  'internazionale': 'Inter Milan',
+  'bayern münchen': 'Bayern Munich',
+  'bayern munchen': 'Bayern Munich',
+  'paris saint germain': 'Paris Saint-Germain',
+  'paris saint-germain': 'Paris Saint-Germain',
+  'psg': 'Paris Saint-Germain',
+  'atletico madrid': 'Atlético Madrid',
+  'barcelona': 'FC Barcelona',
+  'vfb stuttgart': 'Stuttgart',
+  'bodo/glimt': 'Bodø/Glimt',
+  'fk bodo/glimt': 'Bodø/Glimt',
+  'fenerbahce': 'Fenerbahçe',
+  'roma': 'AS Roma',
+  'lens': 'RC Lens',
+  'club brugge kv': 'Club Brugge',
+  'aek athens fc': 'AEK Athens',
+  'viking fk': 'Viking',
+  'sk slavia praha': 'Slavia Praha',
+  'slavia prague': 'Slavia Praha',
+  'sporting': 'Sporting CP',
+  'sporting lisbon': 'Sporting CP',
+  'fc porto': 'Porto',
+  'lask linz': 'LASK',
+  'psv': 'PSV Eindhoven',
+  'napoli': 'Napoli',
+  'manchester city': 'Manchester City',
+  'betis': 'Real Betis',
+};
+
+export function canonicalClubName(name) {
+  return NAME_ALIASES[String(name).trim().toLowerCase()] || name;
+}
+
+/**
  * Transforme un nom de club en identifiant stable (mêmes règles que le
  * script de seed) : minuscules, sans accents, tirets à la place des espaces.
  */
@@ -89,14 +159,15 @@ export function normalizeFixture(fixture) {
   };
 
   const shortStatus = fixture.fixture.status.short;
-  const homeTeam = fixture.teams.home.name;
-  const awayTeam = fixture.teams.away.name;
+  const homeTeam = canonicalClubName(fixture.teams.home.name);
+  const awayTeam = canonicalClubName(fixture.teams.away.name);
 
   return {
     matchId: `${slugify(homeTeam)}-vs-${slugify(awayTeam)}`,
     status: statusMap[shortStatus] || 'scheduled',
     homeTeam,
     awayTeam,
+    matchday: parseLeagueMatchday(fixture.league?.round),
     score:
       fixture.goals.home !== null && fixture.goals.away !== null
         ? { home: fixture.goals.home, away: fixture.goals.away }

@@ -299,8 +299,11 @@ function CalendarTab() {
     setResult('');
     try {
       const res = await httpsCallable(functions, 'importSchedule')();
-      const { received, written } = res.data;
-      setResult(`✓ ${received} matchs reçus de l'API, ${written} ajoutés ou mis à jour.`);
+      const { received, written, newClubs = [] } = res.data;
+      setResult(
+        `✓ ${received} matchs reçus, ${written} ajoutés ou mis à jour.` +
+          (newClubs.length ? ` Nouveaux clubs : ${newClubs.join(', ')}.` : '')
+      );
     } catch (e) {
       setResult(`Erreur : ${e.message}`);
     }

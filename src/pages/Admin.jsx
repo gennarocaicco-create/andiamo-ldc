@@ -209,8 +209,19 @@ function ScoresTab({ actor }) {
 
 function PlayersTab({ isOwner, actor }) {
   const [players, setPlayers] = useState([]);
+  // Brouillons gardés par joueur : on peut ouvrir plusieurs messages, écrire
+  // dans chacun, puis tout enregistrer d'un coup.
   const [messageDrafts, setMessageDrafts] = useState({});
-  const [openMessageId, setOpenMessageId] = useState(null);
+  const [openIds, setOpenIds] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  function toggleOpen(id) {
+    setOpenIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  }
+
+  const dirtyIds = players
+    .filter((p) => messageDrafts[p.id] !== undefined && messageDrafts[p.id].trim() !== (p.message || ''))
+    .map((p) => p.id);
 
   useEffect(() => {
     fetchPlayerLeaderboard().then(setPlayers);
@@ -225,11 +236,22 @@ function PlayersTab({ isOwner, actor }) {
     }
   }
 
-  async function handleSaveMessage(playerId) {
-    const text = messageDrafts[playerId] ?? '';
-    await setPlayerMessage(playerId, text.trim(), actor);
-    setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, message: text.trim() || null } : p)));
-    setOpenMessageId(null);
+  async function saveMessages(ids, overrides = {}) {
+    setSaving(true);
+    try {
+      for (const id of ids) {
+        const text = (overrides[id] ?? messageDrafts[id] ?? '').trim();
+        await setPlayerMessage(id, text, actor);
+        setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, message: text || null } : p)));
+        setMessageDrafts((d) => {
+          const { [id]: _removed, ...rest } = d;
+          return rest;
+        });
+        setOpenIds((open) => open.filter((x) => x !== id));
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -246,8 +268,8 @@ function PlayersTab({ isOwner, actor }) {
             </div>
 
             <button
-              onClick={() => setOpenMessageId(openMessageId === player.id ? null : player.id)}
-              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, padding: '6px 11px', borderRadius: 9, border: 'none', cursor: 'pointer', background: player.message ? 'var(--gold)' : 'rgba(201,162,39,0.12)', color: player.message ? '#fff' : '#8A6A16' }}
+              onClick={() => toggleOpen(player.id)}
+              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, padding: '6px 11px', borderRadius: 9, border: 'none', cursor: 'pointer', background: player.message || dirtyIds.includes(player.id) ? 'var(--gold)' : 'rgba(201,162,39,0.12)', color: player.message || dirtyIds.includes(player.id) ? '#fff' : '#8A6A16' }}
             >
               Message
             </button>
@@ -265,20 +287,20 @@ function PlayersTab({ isOwner, actor }) {
             )}
           </div>
 
-          {openMessageId === player.id && (
+          {openIds.includes(player.id) && (
             <div style={{ marginTop: 10 }}>
               <textarea
                 className="field-input"
                 rows={2}
-                defaultValue={player.message || ''}
+                value={messageDrafts[player.id] ?? player.message ?? ''}
                 onChange={(e) => setMessageDrafts((d) => ({ ...d, [player.id]: e.target.value }))}
                 placeholder="Écrire un message d'encouragement..."
               />
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button onClick={() => { setMessageDrafts((d) => ({ ...d, [player.id]: '' })); handleSaveMessage(player.id); }} style={{ flex: 1, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 11.5, color: 'var(--lock)', background: 'rgba(184,69,47,0.08)', border: '1.3px solid rgba(184,69,47,0.25)', padding: 7, borderRadius: 9, cursor: 'pointer' }}>
+                <button onClick={() => saveMessages([player.id], { [player.id]: '' })} style={{ flex: 1, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 11.5, color: 'var(--lock)', background: 'rgba(184,69,47,0.08)', border: '1.3px solid rgba(184,69,47,0.25)', padding: 7, borderRadius: 9, cursor: 'pointer' }}>
                   Supprimer
                 </button>
-                <button onClick={() => handleSaveMessage(player.id)} style={{ flex: 2, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 11.5, color: '#fff', background: 'var(--gold)', border: 'none', padding: 8, borderRadius: 9, cursor: 'pointer' }}>
+                <button onClick={() => saveMessages([player.id])} style={{ flex: 2, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 11.5, color: '#fff', background: 'var(--gold)', border: 'none', padding: 8, borderRadius: 9, cursor: 'pointer' }}>
                   Enregistrer
                 </button>
               </div>
@@ -286,6 +308,18 @@ function PlayersTab({ isOwner, actor }) {
           )}
         </div>
       ))}
+
+      {dirtyIds.length > 0 && (
+        <div style={{ position: 'sticky', bottom: 84, padding: '0 16px', zIndex: 5 }}>
+          <button
+            onClick={() => saveMessages(dirtyIds)}
+            disabled={saving}
+            style={{ width: '100%', fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14, color: '#fff', background: 'var(--blue)', border: 'none', padding: 13, borderRadius: 14, cursor: 'pointer', boxShadow: '0 10px 22px -10px rgba(10,22,56,0.55)', opacity: saving ? 0.6 : 1 }}
+          >
+            {saving ? 'Enregistrement...' : `Tout enregistrer (${dirtyIds.length} message${dirtyIds.length > 1 ? 's' : ''})`}
+          </button>
+        </div>
+      )}
     </>
   );
 }

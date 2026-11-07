@@ -1,8 +1,27 @@
 import { collection, getDocs, query, where, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase.js';
-import { rankPlayers, tieBreakValue } from '../utils/scoring.js';
+import { rankPlayers, tieBreakValue, scoreMatchPrediction } from '../utils/scoring.js';
 import { logAdminAction } from './auditLog.js';
 import { computeBonusBreakdown } from './bonusScoring.js';
+
+/**
+ * Points d'un pronostic, recalculés à partir du score RÉEL du match et du
+ * pronostic — jamais à partir des points mémorisés, qui peuvent être
+ * périmés (score corrigé après coup, synchro automatique + saisie manuelle
+ * en même temps…). Le score du match est ainsi la seule source de vérité.
+ * Règle : score exact 2 pts, bon résultat 1 pt, sinon 0 ; match reporté
+ * ou annulé → 0 ; match pas terminé → 0.
+ */
+export function withComputedScore(prediction, match) {
+  const base = { ...prediction, points: 0, exact: false, correctResult: false };
+  if (!match || match.status !== 'finished' || !match.score || !prediction.predictedScore) return base;
+  const result = scoreMatchPrediction(
+    { home: Number(prediction.predictedScore.home), away: Number(prediction.predictedScore.away) },
+    { home: Number(match.score.home), away: Number(match.score.away) },
+    false
+  );
+  return { ...base, ...result };
+}
 
 /**
  * Calcule le classement des joueurs à partir de leurs pronostics, EN
@@ -28,9 +47,11 @@ export async function fetchPlayerLeaderboard() {
   const bonusPicksByUid = new Map();
   bonusPicksSnap.forEach((d) => bonusPicksByUid.set(d.id, d.data()));
 
+  const matchesById = new Map(matches.map((m) => [m.id, m]));
+
   const predictionsByUser = new Map();
   predictionsSnap.forEach((d) => {
-    const prediction = d.data();
+    const prediction = withComputedScore(d.data(), matchesById.get(d.data().matchId));
     const list = predictionsByUser.get(prediction.uid) || [];
     list.push(prediction);
     predictionsByUser.set(prediction.uid, list);
@@ -72,9 +93,12 @@ export async function fetchPlayerLeaderboard() {
 
 /** Tous les pronostics bruts d'un joueur (exact/correctResult/points inclus), sans filtre de verrouillage — utilisé pour calculer les bonus. */
 export async function fetchPlayerRawPredictions(uid) {
-  const q = query(collection(db, 'predictions'), where('uid', '==', uid));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const [snap, matchesSnap] = await Promise.all([
+    getDocs(query(collection(db, 'predictions'), where('uid', '==', uid))),
+    getDocs(collection(db, 'matches')),
+  ]);
+  const matchesById = new Map(matchesSnap.docs.map((d) => [d.id, d.data()]));
+  return snap.docs.map((d) => withComputedScore({ id: d.id, ...d.data() }, matchesById.get(d.data().matchId)));
 }
 
 /**
@@ -114,7 +138,7 @@ export async function fetchPlayerRecentPredictions(uid) {
     .map(({ prediction, match }) => ({
       id: prediction.id,
       predictedScore: prediction.predictedScore,
-      points: prediction.points,
+      points: withComputedScore(prediction, match).points,
       homeClub: match.homeClub,
       awayClub: match.awayClub,
     }));

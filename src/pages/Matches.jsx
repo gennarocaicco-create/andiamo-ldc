@@ -4,6 +4,7 @@ import { db } from '../lib/firebase.js';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fetchAllMatches } from '../services/matches.js';
+import { withComputedScore } from '../services/players.js';
 import PullToRefresh from '../components/PullToRefresh.jsx';
 import BottomNav from '../components/BottomNav.jsx';
 import { getPageCache, setPageCache } from '../utils/pageCache.js';
@@ -98,7 +99,8 @@ export default function Matches() {
         let statusLabel = 'À pronostiquer';
         let statusColor = 'var(--gold)';
         if (match.status === 'finished') {
-          statusLabel = myPrediction ? `+${myPrediction.points ?? 0} pt${(myPrediction.points ?? 0) > 1 ? 's' : ''}` : 'Terminé';
+          const earned = myPrediction ? withComputedScore(myPrediction, match).points : 0;
+          statusLabel = myPrediction ? `+${earned} pt${earned > 1 ? 's' : ''}` : 'Terminé';
           statusColor = 'var(--win)';
         } else if (isLocked) {
           statusLabel = 'Verrouillé';
